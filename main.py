@@ -1,6 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
-import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import google.generativeai as genai
@@ -9,13 +8,21 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Get API key
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise RuntimeError("GEMINI_API_KEY is missing. Please check your environment variables.")
+
+# Configure Generative AI
+genai.configure(api_key=api_key)
+
 # Initialize FastAPI app
 app = FastAPI()
 
 # CORS settings
 origins = [
     "http://localhost:5174",  # Your React app origin
-    "http://localhost:3000",  # Add any other frontend origin if needed
+    "http://localhost:3000",
 ]
 
 app.add_middleware(
@@ -33,14 +40,11 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
 
-# Configure the Generative AI model
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
 # Store the chat session globally
 chat_session = None
 
-# Initialize the chat session with status codes context
-def initialize_chat():
+# Initialize the chat session
+def get_chat_session():
     global chat_session
     if chat_session is None:
         model = genai.GenerativeModel(model_name="gemini-2.0-flash-exp")
@@ -60,18 +64,18 @@ def initialize_chat():
                 },
             ]
         )
+    return chat_session
 
 # Chat endpoint
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
+async def chat(request: ChatRequest, session=Depends(get_chat_session)):
     try:
-        initialize_chat()  # Ensure chat session is initialized
-        response = chat_session.send_message(request.message)
+        response = session.send_message(request.message)
         return {"response": response.text}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Error in generating response")
-
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # Run the FastAPI app
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
